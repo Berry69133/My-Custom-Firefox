@@ -1,0 +1,44 @@
+# My Custom Firefox — Firefox Extension
+
+## Run it in Firefox (temporary add-on)
+
+1. Open `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on…**
+3. Select `hello-world-extension/manifest.json`
+4. Click the toolbar button **My Custom Firefox**
+5. Use the popup to manage favicons
+
+## Rename a tab (right-click)
+
+1. Right-click any tab
+2. Click **Rename Tab**
+3. Enter a new name and press **OK** (leave it blank to reset)
+
+Notes:
+
+- Renaming works on normal web pages. Firefox restricts extensions on some internal pages like `about:` so renaming won’t work there.
+
+## Customize favicons
+
+### Change a site’s favicon locally (tabs)
+
+1. Open a page (the URL will auto-fill in the popup)
+2. Click the toolbar button **My Custom Firefox**
+3. Drop/select an image, pick a size, then click **Change Local Favicon**
+
+Notes:
+
+- Rules are saved in `storage.local` for this Firefox profile.
+- “Use regex pattern” lets you target multiple URLs (invalid regex patterns are ignored).
+
+### Create a bookmark with a custom favicon
+
+The popup can create a bookmark that uses a redirect URL on `0xa.click` (same approach as the `CustomBookmarkFavicon` reference extension) to make Firefox show your custom icon in the bookmarks UI.
+
+- This relies on an external service. Don’t use it if you’re not comfortable with that.
+
+## Where to see logs
+
+- Open `about:debugging#/runtime/this-firefox`
+- Find **My Custom Firefox** → **Inspect** to open the extension debugger
+- The background script logs: “Hello World extension loaded.”

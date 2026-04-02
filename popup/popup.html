@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>My Custom Firefox</title>
+    <style>
+      body { font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 12px; min-width: 320px; }
+      #announce { width: 100%; font-weight: 600; text-align: center; min-height: 18px; margin-bottom: 8px; }
+
+      .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+      .tab { padding: 6px 10px; cursor: pointer; background: #f1f3f7; border: 1px solid #d6dbe6; border-radius: 8px; user-select: none; }
+      .tab.active { background: #fff; border-color: #b9c3d9; }
+      .tab-content { display: none; }
+      .tab-content.active { display: block; }
+
+      #dropzone { border: 2px dashed #b9c3d9; padding: 14px; text-align: center; border-radius: 10px; cursor: pointer; background: #fafbfe; }
+      #dropzone.drag { border-color: #3b82f6; background: #eff6ff; }
+
+      select, input, button { margin-top: 10px; width: 100%; box-sizing: border-box; }
+      input, select { padding: 8px 10px; border: 1px solid #d6dbe6; border-radius: 10px; background: #fff; }
+      button { padding: 9px 10px; border: 1px solid #cfd7e3; border-radius: 10px; background: #f7f9fc; cursor: pointer; }
+      button:hover { background: #eef3fb; }
+
+      #preview { margin-top: 10px; display: block; border: 1px solid #d6dbe6; border-radius: 10px; width: 64px; height: 64px; object-fit: contain; background: #fff; }
+      #fileInput { display: none; }
+
+      .checkbox-container { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+      #useRegex { width: auto; margin: 0; }
+      .hint { margin-top: 10px; font-size: 12px; color: #5b6477; }
+
+      #customFaviconsList { overflow-y: auto; border: 1px solid #e6e8ee; border-radius: 10px; margin-top: 10px; padding: 6px; max-height: 260px; background: #fff; }
+      .favicon-item { display: flex; align-items: center; gap: 10px; padding: 6px; border-bottom: 1px solid #f0f2f6; }
+      .favicon-item:last-child { border-bottom: none; }
+      .favicon-item img { width: 16px; height: 16px; }
+      .favicon-item .url { flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .favicon-item .remove-btn { width: auto; margin: 0; padding: 4px 8px; border-radius: 8px; border: 1px solid #f3b3b3; background: #ffecec; }
+    </style>
+  </head>
+  <body>
+    <div id="announce"></div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="favicons">Favicons</div>
+      <div class="tab" data-tab="manage">Manage</div>
+    </div>
+
+    <div id="faviconsTab" class="tab-content active">
+      <div id="dropzone">Drag an image here or click to select</div>
+      <input type="file" id="fileInput" accept="image/*" />
+
+      <select id="size">
+        <option value="16">16x16</option>
+        <option value="32" selected>32x32</option>
+        <option value="64">64x64</option>
+      </select>
+
+      <div class="checkbox-container">
+        <input type="checkbox" id="useRegex" />
+        <label for="useRegex">Use regex pattern</label>
+      </div>
+
+      <input id="urlPattern" type="text" placeholder="URL or pattern" />
+      <img id="preview" alt="Preview" />
+
+      <button id="localFaviconBtn">Change Local Favicon</button>
+
+      <input id="title" type="text" placeholder="Bookmark title (optional)" />
+      <button id="bookmarkBtn">Create Bookmark With Custom Favicon</button>
+
+      <div class="hint">
+        Bookmark icons use a redirect URL (`0xa.click`) like the reference extension. Don’t use this if you’re not comfortable relying on an external service.
+      </div>
+    </div>
+
+    <div id="manageTab" class="tab-content">
+      <div class="hint">Local favicon rules (stored in this Firefox profile).</div>
+      <div id="customFaviconsList"></div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

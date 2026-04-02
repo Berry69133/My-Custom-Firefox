@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "My Custom Firefox",
+  "version": "1.0.0",
+  "description": "A tiny Hello World WebExtension for Firefox.",
+  "permissions": ["tabs", "activeTab", "storage", "menus", "bookmarks", "<all_urls>"],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["tab_renamer.js"]
+    }
+  ],
+  "browser_action": {
+    "default_title": "My Custom Firefox",
+    "default_popup": "popup/popup.html"
+  }
+}
