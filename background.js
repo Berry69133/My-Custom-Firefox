@@ -9,6 +9,22 @@ console.log("Hello World extension loaded.");
 
 let tabList = new Map();
 
+async function openFaviconManager() {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  const tabUrl = tab?.url ?? "";
+  const tabTitle = tab?.title ?? "";
+  const tabId = typeof tab?.id === "number" ? tab.id : "";
+
+  await browser.windows.create({
+    url: browser.runtime.getURL(
+      `popup/popup.html?tabId=${encodeURIComponent(String(tabId))}&tabUrl=${encodeURIComponent(tabUrl)}&tabTitle=${encodeURIComponent(tabTitle)}`
+    ),
+    type: "popup",
+    width: 420,
+    height: 640
+  });
+}
+
 function injectableFavicon(base64) {
   return `(function() {
     const existingFavicons = document.querySelectorAll('link[rel*="icon"]');
@@ -32,7 +48,21 @@ function matches(matcher, url, isRegex) {
       return false;
     }
   }
-  return url === matcher;
+
+  // Back-compat + safer default:
+  // - If matcher looks like a full URL (or includes a path), require exact URL match.
+  // - Otherwise treat matcher as a domain and match current host (including subdomains).
+  if (matcher.includes("://") || matcher.includes("/")) {
+    return url === matcher;
+  }
+
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    const domain = String(matcher).toLowerCase();
+    return host === domain || host.endsWith(`.${domain}`);
+  } catch {
+    return false;
+  }
 }
 
 async function setTabFavicon(tabId, base64Image) {
@@ -211,7 +241,7 @@ function updateMap() {
   if (tabList.size >= 1) {
     browser.storage.local.set({ map: Object.fromEntries(tabList) });
   } else {
-    browser.storage.local.clear();
+    browser.storage.local.remove("map");
   }
 }
 
@@ -255,3 +285,5 @@ browser.tabs.onUpdated.addListener(applyAllMatchers);
 browser.tabs.onCreated.addListener(applyAllMatchers);
 browser.tabs.onActivated.addListener(applyAllMatchers);
 browser.runtime.onStartup.addListener(makeBookmarksUnique);
+
+browser.browserAction.onClicked.addListener(openFaviconManager);

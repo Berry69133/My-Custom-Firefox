@@ -1,4 +1,5 @@
 let base64Image = null;
+let currentTabId = null;
 let currentTabUrl = null;
 let currentTabTitle = null;
 
@@ -28,6 +29,25 @@ function announce(text, bgColor, textColor) {
     announceBar.style.backgroundColor = "";
     announceBar.style.color = "";
   }, 3500);
+}
+
+function hostnameFromInput(value) {
+  const raw = value.trim();
+  if (!raw) return null;
+
+  // If user pasted a URL, extract hostname.
+  if (raw.includes("://")) {
+    try {
+      return new URL(raw).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+
+  // If user typed a domain, accept it (strip any accidental path/query).
+  const withoutPath = raw.split(/[/?#]/, 1)[0];
+  if (!withoutPath) return null;
+  return withoutPath.toLowerCase();
 }
 
 async function getCurrentTab() {
@@ -150,17 +170,56 @@ async function loadCustomFaviconsList() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
-  const tab = await getCurrentTab();
-  currentTabUrl = tab?.url ?? null;
-  currentTabTitle = tab?.title ?? null;
-  if (currentTabUrl) urlPatternInput.value = currentTabUrl;
+  const params = new URLSearchParams(window.location.search);
+  const paramTabId = params.get("tabId");
+  const paramUrl = params.get("tabUrl");
+  const paramTitle = params.get("tabTitle");
+
+  if (paramTabId) {
+    const parsed = Number.parseInt(paramTabId, 10);
+    if (Number.isFinite(parsed)) currentTabId = parsed;
+  }
+
+  if (paramUrl) currentTabUrl = paramUrl;
+  if (paramTitle) currentTabTitle = paramTitle;
+
+  // If we know the originating tab id, prefer reading from that tab (so we never
+  // accidentally use the moz-extension:// window URL).
+  if (currentTabId !== null) {
+    try {
+      const tab = await browser.tabs.get(currentTabId);
+      currentTabUrl = tab?.url ?? currentTabUrl;
+      currentTabTitle = tab?.title ?? currentTabTitle;
+    } catch {
+      // Tab might have been closed; keep query-string values.
+    }
+  } else if (!currentTabUrl || !currentTabTitle) {
+    // Fallback for cases where popup is used as a browser_action popup.
+    const tab = await getCurrentTab();
+    currentTabUrl = currentTabUrl ?? tab?.url ?? null;
+    currentTabTitle = currentTabTitle ?? tab?.title ?? null;
+  }
+
+  if (currentTabUrl) {
+    try {
+      urlPatternInput.value = new URL(currentTabUrl).hostname;
+    } catch {
+      urlPatternInput.value = currentTabUrl;
+    }
+  }
 });
 
 localFaviconBtn.addEventListener("click", async () => {
   if (!base64Image) return announce("Upload an image first.", "red", "white");
 
-  const urlPattern = urlPatternInput.value.trim();
-  if (!urlPattern) return announce("Enter a URL or pattern.", "red", "white");
+  let urlPattern = urlPatternInput.value.trim();
+  if (!urlPattern) return announce("Enter a domain or pattern.", "red", "white");
+
+  if (!useRegexCheckbox.checked) {
+    const hostname = hostnameFromInput(urlPattern);
+    if (!hostname) return announce("Invalid domain/URL.", "red", "white");
+    urlPattern = hostname;
+  }
 
   try {
     const faviconData = {
@@ -186,10 +245,23 @@ bookmarkBtn.addEventListener("click", async () => {
   if (!base64Image) return announce("Upload an image first.", "red", "white");
   if (useRegexCheckbox.checked) return announce("Disable regex to create a bookmark", "red", "white");
 
-  const tab = await getCurrentTab();
-  const url = tab?.url ?? currentTabUrl;
-  const titleFallback = tab?.title ?? currentTabTitle ?? url ?? "Custom Bookmark";
+  let url = currentTabUrl;
+  let titleFallback = currentTabTitle ?? currentTabUrl ?? "Custom Bookmark";
+
+  if (currentTabId !== null) {
+    try {
+      const tab = await browser.tabs.get(currentTabId);
+      url = tab?.url ?? url;
+      titleFallback = tab?.title ?? titleFallback;
+    } catch {
+      // Keep last-known URL/title.
+    }
+  }
+
   if (!url) return announce("No active tab URL found.", "red", "white");
+  if (url.startsWith("moz-extension://")) {
+    return announce("Couldn't find the original tab URL. Close and re-open the window from the toolbar button.", "red", "white");
+  }
 
   const customUrl = `https://0xa.click/?p=${encodeURIComponent(base64Image)}&u=${encodeURIComponent(url)}`;
   const bookmarkTitle = titleInput.value.trim() || titleFallback;
