@@ -5,11 +5,11 @@
   "description": "A tiny Hello World WebExtension for Firefox.",
   "permissions": ["tabs", "activeTab", "storage", "menus", "bookmarks", "<all_urls>"],
   "icons": {
-    "16": "logo.png",
-    "32": "logo.png",
-    "48": "logo.png",
-    "64": "logo.png",
-    "128": "logo.png"
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "64": "icons/icon64.png",
+    "128": "icons/icon128.png"
   },
   "background": {
     "scripts": ["background.js"]
@@ -23,11 +23,11 @@
   "browser_action": {
     "default_title": "My Custom Firefox",
     "default_icon": {
-      "16": "logo.png",
-      "32": "logo.png",
-      "48": "logo.png",
-      "64": "logo.png",
-      "128": "logo.png"
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "64": "icons/icon64.png",
+      "128": "icons/icon128.png"
     }
   }
 }
