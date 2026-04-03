@@ -8,6 +8,41 @@ browser.runtime.onMessage.addListener((message) => {
 console.log("Hello World extension loaded.");
 
 let tabList = new Map();
+let singletonDomains = [];
+const singletonRedirectingTabs = new Set();
+
+async function loadSingletonDomains() {
+  const stored = await browser.storage.local.get("singletonDomains");
+  singletonDomains = Array.isArray(stored.singletonDomains) ? stored.singletonDomains : [];
+}
+
+function matchSingletonDomain(url) {
+  if (!Array.isArray(singletonDomains) || singletonDomains.length === 0) return null;
+
+  let hostname = null;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+
+  if (!hostname) return null;
+
+  for (const entry of singletonDomains) {
+    const domain = String(entry || "").toLowerCase().trim();
+    if (!domain) continue;
+    if (hostname === domain || hostname.endsWith(`.${domain}`)) return domain;
+  }
+
+  return null;
+}
+
+function markSingletonRedirecting(tabId) {
+  singletonRedirectingTabs.add(tabId);
+  setTimeout(() => singletonRedirectingTabs.delete(tabId), 2000);
+}
+
+loadSingletonDomains().catch(() => {});
 
 async function openFaviconManager() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -40,7 +75,17 @@ function injectableFavicon(base64) {
   })();`;
 }
 
-function matches(matcher, url, isRegex) {
+function normalizeUrlForExactMatch(url) {
+  try {
+    const parsed = new URL(url);
+    // Ignore the fragment so a rule can match the "same page" regardless of #hash.
+    return `${parsed.origin}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function matches(matcher, url, isRegex, matchType) {
   if (isRegex) {
     try {
       return new RegExp(matcher).test(url);
@@ -49,11 +94,15 @@ function matches(matcher, url, isRegex) {
     }
   }
 
-  // Back-compat + safer default:
-  // - If matcher looks like a full URL (or includes a path), require exact URL match.
-  // - Otherwise treat matcher as a domain and match current host (including subdomains).
-  if (matcher.includes("://") || matcher.includes("/")) {
-    return url === matcher;
+  // Back-compat: older rules only stored `isRegex`.
+  const resolvedType = matchType ?? (matcher.includes("://") ? "url" : "domain");
+
+  if (resolvedType === "url") {
+    const normalizedUrl = normalizeUrlForExactMatch(url);
+    const normalizedMatcher = normalizeUrlForExactMatch(matcher);
+    if (!normalizedUrl || !normalizedMatcher) return false;
+    // "url" rules are prefix-based (the common "http://site/path*" behavior).
+    return normalizedUrl.startsWith(normalizedMatcher);
   }
 
   try {
@@ -79,7 +128,7 @@ async function applyAllMatchers() {
     if (!tab.url) continue;
 
     for (const [matcher, details] of Object.entries(customFavicons)) {
-      if (!matches(matcher, tab.url, details.isRegex)) continue;
+      if (!matches(matcher, tab.url, details.isRegex, details.matchType)) continue;
       try {
         await setTabFavicon(tab.id, details.base64Image);
       } catch {
@@ -89,70 +138,7 @@ async function applyAllMatchers() {
   }
 }
 
-function intToBase26(num) {
-  if (num === 0) return "a";
-
-  let result = "";
-  let n = num;
-  while (n > 0) {
-    const remainder = n % 26;
-    result = String.fromCharCode(97 + remainder) + result;
-    n = Math.floor(n / 26);
-  }
-  return result;
-}
-
-function hashPrefix(url) {
-  let hash = 0;
-  for (let i = 0; i < url.length; i++) {
-    const char = url.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
-  }
-
-  return intToBase26(Math.abs(hash));
-}
-
-async function makeBookmarksUnique() {
-  try {
-    const bookmarkTree = await browser.bookmarks.getTree();
-    const relayBookmarks = [];
-
-    function findRelays(bookmarkNodes) {
-      for (const node of bookmarkNodes) {
-        if (node.url) {
-          try {
-            const url = new URL(node.url);
-            if (url.hostname === "0xa.click" || url.hostname.endsWith(".0xa.click")) {
-              relayBookmarks.push(node);
-            }
-          } catch {
-            // ignore
-          }
-        }
-
-        if (node.children) findRelays(node.children);
-      }
-    }
-
-    findRelays(bookmarkTree);
-    if (relayBookmarks.length === 0) return;
-
-    for (const bookmark of relayBookmarks) {
-      const originalUrl = new URL(bookmark.url);
-      const icon = originalUrl.searchParams.get("p");
-      if (!icon) continue;
-
-      const subdomain = hashPrefix(icon);
-      const newUrl = new URL(bookmark.url);
-      newUrl.hostname = `${subdomain}.0xa.click`;
-
-      await browser.bookmarks.update(bookmark.id, { url: newUrl.toString() });
-    }
-  } catch (error) {
-    console.error("Error in makeBookmarksUnique:", error);
-  }
-}
+// (bookmark-favicon feature removed)
 
 browser.menus.create(
   {
@@ -252,6 +238,7 @@ async function loadMap() {
 
 async function onReload() {
   await loadMap();
+  await loadSingletonDomains();
   tabList.forEach((value, key) => {
     const tabId = Number.parseInt(key, 10);
     if (!Number.isFinite(tabId)) return;
@@ -272,18 +259,49 @@ browser.runtime.onStartup.addListener(onReload);
 browser.tabs.onRemoved.addListener(closeTab);
 browser.tabs.onUpdated.addListener(titleChanged);
 
+browser.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local") return;
+  if (!changes?.singletonDomains) return;
+  const next = changes.singletonDomains.newValue;
+  singletonDomains = Array.isArray(next) ? next : [];
+});
+
 browser.runtime.onMessage.addListener(async (message) => {
   if (message?.action === "newRule") {
     applyAllMatchers();
-    makeBookmarksUnique();
-  } else if (message?.action === "makeUnique") {
-    makeBookmarksUnique();
+  }
+});
+
+browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (!changeInfo?.url) return;
+  if (!tab || typeof tab.windowId !== "number") return;
+  if (singletonRedirectingTabs.has(tabId)) return;
+
+  const matchedDomain = matchSingletonDomain(changeInfo.url);
+  if (!matchedDomain) return;
+
+  const tabs = await browser.tabs.query({ windowId: tab.windowId });
+  const existing = tabs.find((t) => {
+    if (!t?.url || typeof t.id !== "number") return false;
+    if (t.id === tabId) return false;
+    return matchSingletonDomain(t.url) === matchedDomain;
+  });
+
+  if (!existing || typeof existing.id !== "number") return;
+
+  try {
+    markSingletonRedirecting(existing.id);
+    markSingletonRedirecting(tabId);
+    await browser.windows.update(tab.windowId, { focused: true });
+    await browser.tabs.update(existing.id, { url: changeInfo.url, active: true });
+    await browser.tabs.remove(tabId);
+  } catch {
+    // Ignore races (tab closed, restricted URL, etc).
   }
 });
 
 browser.tabs.onUpdated.addListener(applyAllMatchers);
 browser.tabs.onCreated.addListener(applyAllMatchers);
 browser.tabs.onActivated.addListener(applyAllMatchers);
-browser.runtime.onStartup.addListener(makeBookmarksUnique);
 
 browser.browserAction.onClicked.addListener(openFaviconManager);

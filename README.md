@@ -34,9 +34,7 @@ Notes:
 
 ### Create a bookmark with a custom favicon
 
-The popup can create a bookmark that uses a redirect URL on `0xa.click` (same approach as the `CustomBookmarkFavicon` reference extension) to make Firefox show your custom icon in the bookmarks UI.
-
-- This relies on an external service. Don’t use it if you’re not comfortable with that.
+Removed (it relied on an external redirect service).
 
 ## Where to see logs
 

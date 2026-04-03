@@ -17,8 +17,8 @@
       #dropzone { border: 2px dashed #b9c3d9; padding: 14px; text-align: center; border-radius: 10px; cursor: pointer; background: #fafbfe; }
       #dropzone.drag { border-color: #3b82f6; background: #eff6ff; }
 
-      select, input, button { margin-top: 10px; width: 100%; box-sizing: border-box; }
-      input, select { padding: 8px 10px; border: 1px solid #d6dbe6; border-radius: 10px; background: #fff; }
+      select, input, textarea, button { margin-top: 10px; width: 100%; box-sizing: border-box; }
+      input, select, textarea { padding: 8px 10px; border: 1px solid #d6dbe6; border-radius: 10px; background: #fff; }
       button { padding: 9px 10px; border: 1px solid #cfd7e3; border-radius: 10px; background: #f7f9fc; cursor: pointer; }
       button:hover { background: #eef3fb; }
 
@@ -42,40 +42,32 @@
 
     <div class="tabs">
       <div class="tab active" data-tab="favicons">Favicons</div>
-      <div class="tab" data-tab="manage">Manage</div>
+      <div class="tab" data-tab="singletons">Single-tab</div>
     </div>
 
     <div id="faviconsTab" class="tab-content active">
       <div id="dropzone">Drag an image here or click to select</div>
       <input type="file" id="fileInput" accept="image/*" />
 
-      <select id="size">
-        <option value="16">16x16</option>
-        <option value="32" selected>32x32</option>
-        <option value="64">64x64</option>
-      </select>
-
       <div class="checkbox-container">
         <input type="checkbox" id="useRegex" />
         <label for="useRegex">Use regex pattern</label>
       </div>
 
-      <input id="urlPattern" type="text" placeholder="Domain (example.com) or pattern" />
+      <input id="urlPattern" type="text" placeholder="Domain (example.com), full URL (https://...), or pattern" />
       <img id="preview" alt="Preview" />
 
       <button id="localFaviconBtn">Change Local Favicon</button>
 
-      <input id="title" type="text" placeholder="Bookmark title (optional)" />
-      <button id="bookmarkBtn">Create Bookmark With Custom Favicon</button>
-
-      <div class="hint">
-        Bookmark icons use a redirect URL (`0xa.click`) like the reference extension. Don’t use this if you’re not comfortable relying on an external service.
-      </div>
-    </div>
-
-    <div id="manageTab" class="tab-content">
       <div class="hint">Local favicon rules (stored in this Firefox profile).</div>
       <div id="customFaviconsList"></div>
+    </div>
+
+    <div id="singletonsTab" class="tab-content">
+      <div class="hint">Domains that should only have one tab open per window (one per line).</div>
+      <textarea id="singletonDomains" rows="10" placeholder="example.com&#10;mail.google.com"></textarea>
+      <button id="saveSingletonDomainsBtn">Save Single-tab Domains</button>
+      <div class="hint">Matches subdomains too (e.g. `example.com` also matches `app.example.com`).</div>
     </div>
 
     <script src="popup.js"></script>

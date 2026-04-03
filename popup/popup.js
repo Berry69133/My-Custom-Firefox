@@ -3,18 +3,19 @@ let currentTabId = null;
 let currentTabUrl = null;
 let currentTabTitle = null;
 
+const DEFAULT_FAVICON_SIZE = 32;
+
 const body = document.body;
 const dropzone = document.getElementById("dropzone");
 const fileInput = document.getElementById("fileInput");
-const sizeSelect = document.getElementById("size");
-const bookmarkBtn = document.getElementById("bookmarkBtn");
 const localFaviconBtn = document.getElementById("localFaviconBtn");
-const titleInput = document.getElementById("title");
 const previewImg = document.getElementById("preview");
 const announceBar = document.getElementById("announce");
 const urlPatternInput = document.getElementById("urlPattern");
 const useRegexCheckbox = document.getElementById("useRegex");
 const customFaviconsList = document.getElementById("customFaviconsList");
+const singletonDomainsTextarea = document.getElementById("singletonDomains");
+const saveSingletonDomainsBtn = document.getElementById("saveSingletonDomainsBtn");
 
 const tabs = document.querySelectorAll(".tab");
 const tabContents = document.querySelectorAll(".tab-content");
@@ -31,23 +32,59 @@ function announce(text, bgColor, textColor) {
   }, 3500);
 }
 
-function hostnameFromInput(value) {
-  const raw = value.trim();
-  if (!raw) return null;
+function normalizeUrlForExactMatch(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return null;
+  }
+}
 
-  // If user pasted a URL, extract hostname.
-  if (raw.includes("://")) {
-    try {
-      return new URL(raw).hostname.toLowerCase();
-    } catch {
-      return null;
-    }
+function normalizeUserUrlInput(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+
+  // Accept a few common "missing slashes" typos:
+  // - http/test/ciao -> http://test/ciao
+  // - http:/test/ciao -> http://test/ciao
+  // - http//test/ciao -> http://test/ciao
+  if (/^https?\/(?!\/)/i.test(trimmed)) {
+    return trimmed.replace(/^(https?)\//i, "$1://");
+  }
+  if (/^https?:\/(?!\/)/i.test(trimmed)) {
+    return trimmed.replace(/^(https?):\//i, "$1://");
+  }
+  if (/^https?\/\/(?!\/)/i.test(trimmed)) {
+    return trimmed.replace(/^(https?)\/\//i, "$1://");
   }
 
-  // If user typed a domain, accept it (strip any accidental path/query).
+  return trimmed;
+}
+
+function parseNonRegexMatcher(value) {
+  const raw = normalizeUserUrlInput(value);
+  if (!raw) return null;
+
+  // If user pasted a full URL, store an exact URL matcher.
+  if (raw.includes("://")) {
+    const normalized = normalizeUrlForExactMatch(raw);
+    if (!normalized) return null;
+    return { matchType: "url", matcher: normalized };
+  }
+
+  // Otherwise treat as a domain (strip any accidental path/query).
   const withoutPath = raw.split(/[/?#]/, 1)[0];
   if (!withoutPath) return null;
-  return withoutPath.toLowerCase();
+
+  try {
+    // Use URL parsing to robustly extract hostname (and strip ports if present).
+    const parsed = new URL(`http://${withoutPath}`);
+    if (!parsed.hostname) return null;
+    return { matchType: "domain", matcher: parsed.hostname.toLowerCase() };
+  } catch {
+    return null;
+  }
 }
 
 async function getCurrentTab() {
@@ -75,7 +112,7 @@ function processFile(file) {
   const img = new Image();
   img.src = URL.createObjectURL(file);
   img.onload = () => {
-    setPreviewFromImage(img, Number.parseInt(sizeSelect.value, 10));
+    setPreviewFromImage(img, DEFAULT_FAVICON_SIZE);
   };
 }
 
@@ -102,15 +139,6 @@ fileInput.addEventListener("change", () => {
   processFile(file);
 });
 
-sizeSelect.addEventListener("change", () => {
-  if (!previewImg.src) return;
-  const img = new Image();
-  img.src = previewImg.src;
-  img.onload = () => {
-    setPreviewFromImage(img, Number.parseInt(sizeSelect.value, 10));
-  };
-});
-
 tabs.forEach((tab) => {
   tab.addEventListener("click", () => {
     tabs.forEach((t) => t.classList.remove("active"));
@@ -120,9 +148,61 @@ tabs.forEach((tab) => {
     const tabName = tab.getAttribute("data-tab");
     document.getElementById(`${tabName}Tab`).classList.add("active");
 
-    if (tabName === "manage") loadCustomFaviconsList();
+    if (tabName === "favicons") loadCustomFaviconsList();
+    if (tabName === "singletons") loadSingletonDomains();
   });
 });
+
+function normalizeDomainInput(value) {
+  const raw = normalizeUserUrlInput(value);
+  if (!raw) return null;
+
+  if (raw.includes("://")) {
+    try {
+      const parsed = new URL(raw);
+      return parsed.hostname ? parsed.hostname.toLowerCase() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  const withoutPath = raw.split(/[/?#]/, 1)[0];
+  if (!withoutPath) return null;
+
+  try {
+    const parsed = new URL(`http://${withoutPath}`);
+    return parsed.hostname ? parsed.hostname.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseSingletonDomains(text) {
+  const parts = String(text)
+    .split(/[\n,]/g)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const normalized = [];
+  for (const part of parts) {
+    const domain = normalizeDomainInput(part);
+    if (!domain) continue;
+    normalized.push(domain);
+  }
+
+  return Array.from(new Set(normalized)).sort();
+}
+
+async function loadSingletonDomains() {
+  try {
+    const storage = await browser.storage.local.get("singletonDomains");
+    const list = Array.isArray(storage.singletonDomains) ? storage.singletonDomains : [];
+    singletonDomainsTextarea.value = list.join("\n");
+  } catch (error) {
+    console.error("Error loading singleton domains:", error);
+    singletonDomainsTextarea.value = "";
+  }
+}
 
 async function loadCustomFaviconsList() {
   try {
@@ -144,7 +224,8 @@ async function loadCustomFaviconsList() {
 
       const url = document.createElement("span");
       url.className = "url";
-      url.textContent = pattern;
+      const effectiveType = faviconData.isRegex ? "regex" : (faviconData.matchType ?? (pattern.includes("://") ? "url-prefix" : "domain"));
+      url.textContent = `${pattern} (${effectiveType})`;
 
       const removeBtn = document.createElement("button");
       removeBtn.className = "remove-btn";
@@ -207,25 +288,35 @@ window.addEventListener("DOMContentLoaded", async () => {
       urlPatternInput.value = currentTabUrl;
     }
   }
+
+  // Preload for cases where the user lands directly on the Single-tab tab later.
+  loadSingletonDomains();
+  loadCustomFaviconsList();
 });
 
 localFaviconBtn.addEventListener("click", async () => {
   if (!base64Image) return announce("Upload an image first.", "red", "white");
 
-  let urlPattern = urlPatternInput.value.trim();
-  if (!urlPattern) return announce("Enter a domain or pattern.", "red", "white");
+  const input = urlPatternInput.value.trim();
+  if (!input) return announce("Enter a domain, URL, or pattern.", "red", "white");
 
-  if (!useRegexCheckbox.checked) {
-    const hostname = hostnameFromInput(urlPattern);
-    if (!hostname) return announce("Invalid domain/URL.", "red", "white");
-    urlPattern = hostname;
+  const isRegex = useRegexCheckbox.checked;
+  let urlPattern = input;
+  let matchType = undefined;
+
+  if (!isRegex) {
+    const parsed = parseNonRegexMatcher(input);
+    if (!parsed) return announce("Invalid domain/URL.", "red", "white");
+    urlPattern = parsed.matcher;
+    matchType = parsed.matchType;
   }
 
   try {
     const faviconData = {
       base64Image,
-      size: Number.parseInt(sizeSelect.value, 10),
-      isRegex: useRegexCheckbox.checked
+      size: DEFAULT_FAVICON_SIZE,
+      isRegex,
+      matchType
     };
 
     const storage = await browser.storage.local.get("customFavicons");
@@ -233,6 +324,7 @@ localFaviconBtn.addEventListener("click", async () => {
     customFavicons[urlPattern] = faviconData;
     await browser.storage.local.set({ customFavicons });
     await browser.runtime.sendMessage({ action: "newRule" });
+    loadCustomFaviconsList();
 
     announce("Local favicon rule saved", "green", "white");
   } catch (error) {
@@ -241,43 +333,14 @@ localFaviconBtn.addEventListener("click", async () => {
   }
 });
 
-bookmarkBtn.addEventListener("click", async () => {
-  if (!base64Image) return announce("Upload an image first.", "red", "white");
-  if (useRegexCheckbox.checked) return announce("Disable regex to create a bookmark", "red", "white");
-
-  let url = currentTabUrl;
-  let titleFallback = currentTabTitle ?? currentTabUrl ?? "Custom Bookmark";
-
-  if (currentTabId !== null) {
-    try {
-      const tab = await browser.tabs.get(currentTabId);
-      url = tab?.url ?? url;
-      titleFallback = tab?.title ?? titleFallback;
-    } catch {
-      // Keep last-known URL/title.
-    }
-  }
-
-  if (!url) return announce("No active tab URL found.", "red", "white");
-  if (url.startsWith("moz-extension://")) {
-    return announce("Couldn't find the original tab URL. Close and re-open the window from the toolbar button.", "red", "white");
-  }
-
-  const customUrl = `https://0xa.click/?p=${encodeURIComponent(base64Image)}&u=${encodeURIComponent(url)}`;
-  const bookmarkTitle = titleInput.value.trim() || titleFallback;
+saveSingletonDomainsBtn.addEventListener("click", async () => {
+  const list = parseSingletonDomains(singletonDomainsTextarea.value);
 
   try {
-    await browser.bookmarks.create({
-      title: bookmarkTitle,
-      url: customUrl,
-      parentId: "toolbar_____"
-    });
-    await browser.runtime.sendMessage({ action: "makeUnique" });
-    announce("Bookmark created", "green", "white");
-
-    titleInput.value = "";
+    await browser.storage.local.set({ singletonDomains: list });
+    announce("Single-tab domains saved", "green", "white");
   } catch (error) {
     console.error(error);
-    announce("Failed to create bookmark", "red", "white");
+    announce("Failed to save single-tab domains", "red", "white");
   }
 });
