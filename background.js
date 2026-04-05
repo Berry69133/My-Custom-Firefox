@@ -272,6 +272,46 @@ browser.runtime.onMessage.addListener(async (message) => {
   }
 });
 
+function tabIsInSplitView(tab) {
+  const splitViewId = tab?.splitViewId;
+  if (typeof splitViewId !== "number") return false;
+
+  const noneValue = browser.tabs?.SPLIT_VIEW_ID_NONE;
+  if (typeof noneValue === "number") return splitViewId !== noneValue;
+
+  return splitViewId !== -1;
+}
+
+browser.runtime.onMessage.addListener(async (message, sender) => {
+  if (message?.action === "getSplitViewStatus") {
+    return Promise.resolve({ isSplitView: tabIsInSplitView(sender?.tab) });
+  }
+
+  if (message?.action === "openInNewTab") {
+    const senderTab = sender?.tab;
+    if (!senderTab || typeof senderTab.id !== "number") return;
+    if (typeof message.url !== "string" || message.url.trim() === "") return;
+
+    try {
+      await browser.tabs.create({
+        url: message.url,
+        windowId: senderTab.windowId,
+        index: typeof senderTab.index === "number" ? senderTab.index + 1 : undefined,
+        openerTabId: senderTab.id,
+        active: false
+      });
+    } catch {
+      // Ignore races (tab closed, URL blocked, etc.).
+    }
+  }
+});
+
+browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo?.splitViewId === undefined) return;
+  const enabled = tabIsInSplitView(tab);
+  browser.tabs.sendMessage(tabId, { action: "splitViewMode", enabled }).catch(() => {});
+});
+
 browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (!changeInfo?.url) return;
   if (!tab || typeof tab.windowId !== "number") return;

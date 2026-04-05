@@ -36,6 +36,10 @@ Notes:
 
 Removed (it relied on an external redirect service).
 
+## Split View behavior
+
+When a tab is in Firefox’s Split View, normal left-clicks on links (that would navigate the current tab) are intercepted so the link opens in a new background tab and the Split View remains unchanged.
+
 ## Where to see logs
 
 - Open `about:debugging#/runtime/this-firefox`
