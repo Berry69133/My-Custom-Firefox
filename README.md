@@ -18,6 +18,16 @@ Notes:
 
 - Renaming works on normal web pages. Firefox restricts extensions on some internal pages like `about:` so renaming won’t work there.
 
+## Open a tab in the side bar (right-click)
+
+1. Right-click any tab
+2. Click **Open in Side Bar**
+
+Notes:
+
+- This opens the extension sidebar and tries to show the tab’s URL inside it.
+- The extension relaxes `X-Frame-Options` / CSP `frame-ancestors` on **iframe loads inside the extension sidebar** (requires the `webRequest` + `webRequestBlocking` permissions). Some sites may still break/blank due to other anti-framing measures; in that case they can’t be shown in the sidebar.
+
 ## Customize favicons
 
 ### Change a site’s favicon locally (tabs)
@@ -39,6 +49,13 @@ Removed (it relied on an external redirect service).
 ## Split View behavior
 
 When a tab is in Firefox’s Split View, normal left-clicks on links (that would navigate the current tab) are intercepted so the link opens in a new background tab and the Split View remains unchanged.
+
+## Single-tab behavior
+
+In the extension popup → **Single-tab**:
+
+- **Domains**: keep only one tab open per domain per window.
+- **Regex**: keep only one tab open per window for any URL matching the regex (tested against the full URL string).
 
 ## Where to see logs
 

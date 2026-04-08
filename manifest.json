@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "name": "My Custom Firefox",
-  "version": "1.0.2",
-  "description": "A tiny Hello World WebExtension for Firefox.",
-  "permissions": ["tabs", "activeTab", "storage", "menus", "<all_urls>"],
+  "version": "1.0.3",
+  "description": "Personal customizations for Firefox.",
+  "permissions": ["tabs", "activeTab", "storage", "menus", "webRequest", "webRequestBlocking", "<all_urls>"],
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -14,12 +14,24 @@
   "background": {
     "scripts": ["background.js"]
   },
+  "sidebar_action": {
+    "default_title": "My Custom Firefox",
+    "default_panel": "sidebar/sidebar.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "64": "icons/icon64.png",
+      "128": "icons/icon128.png"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["tab_renamer.js"]
     }
   ],
+  "content_security_policy": "script-src 'self'; object-src 'self'; frame-src http: https: file:;",
   "browser_specific_settings": {
     "gecko": {
       "id": "my-custom-firefox@local"

@@ -9,11 +9,86 @@ console.log("Hello World extension loaded.");
 
 let tabList = new Map();
 let singletonDomains = [];
+let singletonRegex = "";
+let singletonRegexCompiled = null;
+const singletonRegexTabsByWindow = new Map();
 const singletonRedirectingTabs = new Set();
+
+function stripFrameAncestorsFromCsp(value) {
+  const raw = String(value ?? "");
+  if (!raw.trim()) return raw;
+  const parts = raw
+    .split(";")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .filter((directive) => !directive.toLowerCase().startsWith("frame-ancestors "));
+  return parts.join("; ");
+}
+
+function installSidebarEmbedHeaderRelaxation() {
+  if (!browser.webRequest?.onHeadersReceived) return;
+
+  const sidebarUrlPrefix = browser.runtime.getURL("sidebar/");
+
+  browser.webRequest.onHeadersReceived.addListener(
+    (details) => {
+      const documentUrl = details?.documentUrl ?? details?.originUrl ?? "";
+      if (typeof documentUrl !== "string" || !documentUrl.startsWith(sidebarUrlPrefix)) return;
+
+      const responseHeaders = Array.isArray(details.responseHeaders) ? details.responseHeaders : [];
+      let changed = false;
+
+      for (let i = responseHeaders.length - 1; i >= 0; i--) {
+        const header = responseHeaders[i];
+        const name = String(header?.name ?? "").toLowerCase();
+        if (!name) continue;
+
+        if (name === "x-frame-options") {
+          responseHeaders.splice(i, 1);
+          changed = true;
+          continue;
+        }
+
+        if (name === "content-security-policy" || name === "content-security-policy-report-only") {
+          const nextValue = stripFrameAncestorsFromCsp(header.value);
+          if (nextValue !== header.value) {
+            if (nextValue.trim() === "") {
+              responseHeaders.splice(i, 1);
+            } else {
+              header.value = nextValue;
+            }
+            changed = true;
+          }
+        }
+      }
+
+      if (!changed) return;
+      return { responseHeaders };
+    },
+    { urls: ["<all_urls>"], types: ["sub_frame"] },
+    ["blocking", "responseHeaders"]
+  );
+}
 
 async function loadSingletonDomains() {
   const stored = await browser.storage.local.get("singletonDomains");
   singletonDomains = Array.isArray(stored.singletonDomains) ? stored.singletonDomains : [];
+}
+
+function compileSingletonRegex(pattern) {
+  const trimmed = String(pattern ?? "").trim();
+  if (!trimmed) return null;
+  try {
+    return new RegExp(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+async function loadSingletonRegex() {
+  const stored = await browser.storage.local.get("singletonRegex");
+  singletonRegex = typeof stored.singletonRegex === "string" ? stored.singletonRegex : "";
+  singletonRegexCompiled = compileSingletonRegex(singletonRegex);
 }
 
 function matchSingletonDomain(url) {
@@ -37,12 +112,23 @@ function matchSingletonDomain(url) {
   return null;
 }
 
+function matchesSingletonRegex(url) {
+  if (!singletonRegexCompiled) return false;
+  try {
+    return singletonRegexCompiled.test(url);
+  } catch {
+    return false;
+  }
+}
+
 function markSingletonRedirecting(tabId) {
   singletonRedirectingTabs.add(tabId);
   setTimeout(() => singletonRedirectingTabs.delete(tabId), 2000);
 }
 
 loadSingletonDomains().catch(() => {});
+loadSingletonRegex().catch(() => {});
+installSidebarEmbedHeaderRelaxation();
 
 async function openFaviconManager() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -153,6 +239,19 @@ browser.menus.create(
   }
 );
 
+browser.menus.create(
+  {
+    id: "tab-open-sidebar",
+    title: "Open in Side Bar",
+    contexts: ["tab"]
+  },
+  () => {
+    if (browser.runtime.lastError) {
+      console.warn("Failed to create menu:", browser.runtime.lastError.message);
+    }
+  }
+);
+
 function renameTab(_info, tab) {
   if (!tab || typeof tab.id !== "number") return;
 
@@ -179,6 +278,43 @@ function renameTab(_info, tab) {
     });
 }
 
+async function openTabInSideBar(_info, tab) {
+  if (!tab || typeof tab.id !== "number") return;
+  if (typeof browser.sidebarAction?.open !== "function") {
+    console.warn("sidebarAction API not available in this browser.");
+    return;
+  }
+
+  let resolvedTab = tab;
+  try {
+    resolvedTab = await browser.tabs.get(tab.id);
+  } catch {
+    // Ignore.
+  }
+
+  const payload = {
+    action: "sidebarSetTarget",
+    tabId: tab.id,
+    url: resolvedTab?.url ?? "",
+    title: resolvedTab?.title ?? ""
+  };
+
+  try {
+    await browser.storage.local.set({ sidebarTarget: payload });
+  } catch {
+    // Ignore.
+  }
+
+  try {
+    await browser.sidebarAction.open();
+  } catch (error) {
+    console.warn("Failed to open sidebar:", error?.message ?? String(error));
+    return;
+  }
+
+  browser.runtime.sendMessage(payload).catch(() => {});
+}
+
 function updateOnReady(request, sender) {
   if (request?.action !== "ready") return;
   if (!sender?.tab || typeof sender.tab.id !== "number") return;
@@ -198,6 +334,10 @@ function updateOnReady(request, sender) {
 }
 
 function closeTab(tabId) {
+  for (const [windowId, singletonTabId] of singletonRegexTabsByWindow.entries()) {
+    if (singletonTabId === tabId) singletonRegexTabsByWindow.delete(windowId);
+  }
+
   const key = String(tabId);
   if (!tabList.has(key)) return;
   tabList.delete(key);
@@ -239,6 +379,7 @@ async function loadMap() {
 async function onReload() {
   await loadMap();
   await loadSingletonDomains();
+  await loadSingletonRegex();
   tabList.forEach((value, key) => {
     const tabId = Number.parseInt(key, 10);
     if (!Number.isFinite(tabId)) return;
@@ -252,7 +393,16 @@ async function onReload() {
   });
 }
 
-browser.menus.onClicked.addListener(renameTab);
+browser.menus.onClicked.addListener((info, tab) => {
+  switch (info?.menuItemId) {
+    case "tab-name":
+      renameTab(info, tab);
+      break;
+    case "tab-open-sidebar":
+      openTabInSideBar(info, tab).catch(() => {});
+      break;
+  }
+});
 browser.runtime.onMessage.addListener(updateOnReady);
 browser.runtime.onInstalled.addListener(onReload);
 browser.runtime.onStartup.addListener(onReload);
@@ -261,9 +411,17 @@ browser.tabs.onUpdated.addListener(titleChanged);
 
 browser.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
-  if (!changes?.singletonDomains) return;
-  const next = changes.singletonDomains.newValue;
-  singletonDomains = Array.isArray(next) ? next : [];
+
+  if (changes?.singletonDomains) {
+    const nextDomains = changes.singletonDomains.newValue;
+    singletonDomains = Array.isArray(nextDomains) ? nextDomains : [];
+  }
+
+  if (changes?.singletonRegex) {
+    const nextRegex = changes.singletonRegex.newValue;
+    singletonRegex = typeof nextRegex === "string" ? nextRegex : "";
+    singletonRegexCompiled = compileSingletonRegex(singletonRegex);
+  }
 });
 
 browser.runtime.onMessage.addListener(async (message) => {
@@ -318,22 +476,70 @@ browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (singletonRedirectingTabs.has(tabId)) return;
 
   const matchedDomain = matchSingletonDomain(changeInfo.url);
-  if (!matchedDomain) return;
+  if (matchedDomain) {
+    const tabs = await browser.tabs.query({ windowId: tab.windowId });
+    const existing = tabs.find((t) => {
+      if (!t?.url || typeof t.id !== "number") return false;
+      if (t.id === tabId) return false;
+      return matchSingletonDomain(t.url) === matchedDomain;
+    });
 
-  const tabs = await browser.tabs.query({ windowId: tab.windowId });
-  const existing = tabs.find((t) => {
-    if (!t?.url || typeof t.id !== "number") return false;
-    if (t.id === tabId) return false;
-    return matchSingletonDomain(t.url) === matchedDomain;
-  });
+    if (!existing || typeof existing.id !== "number") return;
 
-  if (!existing || typeof existing.id !== "number") return;
+    try {
+      markSingletonRedirecting(existing.id);
+      markSingletonRedirecting(tabId);
+      await browser.windows.update(tab.windowId, { focused: true });
+      await browser.tabs.update(existing.id, { url: changeInfo.url, active: true });
+      await browser.tabs.remove(tabId);
+    } catch {
+      // Ignore races (tab closed, restricted URL, etc).
+    }
+    return;
+  }
+
+  if (!matchesSingletonRegex(changeInfo.url)) return;
+
+  // One "singleton tab" per window for all URLs matching the regex.
+  let singletonTabId = singletonRegexTabsByWindow.get(tab.windowId);
+  if (typeof singletonTabId === "number") {
+    if (singletonTabId === tabId) return;
+    try {
+      const singletonTab = await browser.tabs.get(singletonTabId);
+      if (!singletonTab || singletonTab.windowId !== tab.windowId) {
+        singletonRegexTabsByWindow.delete(tab.windowId);
+        singletonTabId = undefined;
+      }
+    } catch {
+      singletonRegexTabsByWindow.delete(tab.windowId);
+      singletonTabId = undefined;
+    }
+  }
+
+  // If we don't have a remembered singleton tab yet (e.g. after reload),
+  // try to find an existing matching tab in the window first.
+  if (typeof singletonTabId !== "number") {
+    const tabs = await browser.tabs.query({ windowId: tab.windowId });
+    const existing = tabs.find((t) => {
+      if (!t?.url || typeof t.id !== "number") return false;
+      if (t.id === tabId) return false;
+      return matchesSingletonRegex(t.url);
+    });
+
+    if (existing && typeof existing.id === "number") {
+      singletonTabId = existing.id;
+      singletonRegexTabsByWindow.set(tab.windowId, existing.id);
+    } else {
+      singletonRegexTabsByWindow.set(tab.windowId, tabId);
+      return;
+    }
+  }
 
   try {
-    markSingletonRedirecting(existing.id);
+    markSingletonRedirecting(singletonTabId);
     markSingletonRedirecting(tabId);
     await browser.windows.update(tab.windowId, { focused: true });
-    await browser.tabs.update(existing.id, { url: changeInfo.url, active: true });
+    await browser.tabs.update(singletonTabId, { url: changeInfo.url, active: true });
     await browser.tabs.remove(tabId);
   } catch {
     // Ignore races (tab closed, restricted URL, etc).

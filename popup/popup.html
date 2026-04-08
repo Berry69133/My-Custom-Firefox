@@ -68,6 +68,11 @@
       <textarea id="singletonDomains" rows="10" placeholder="example.com&#10;mail.google.com"></textarea>
       <button id="saveSingletonDomainsBtn">Save Single-tab Domains</button>
       <div class="hint">Matches subdomains too (e.g. `example.com` also matches `app.example.com`).</div>
+
+      <div class="hint" style="margin-top: 14px;">Optional: single-tab regex (matches the full URL). Any page that matches will be forced into a single tab per window.</div>
+      <input id="singletonRegex" type="text" placeholder="^https://(mail|calendar)\\.google\\.com/" />
+      <button id="saveSingletonRegexBtn">Save Single-tab Regex</button>
+      <div class="hint">Invalid regex patterns are ignored.</div>
     </div>
 
     <script src="popup.js"></script>

@@ -16,6 +16,8 @@ const useRegexCheckbox = document.getElementById("useRegex");
 const customFaviconsList = document.getElementById("customFaviconsList");
 const singletonDomainsTextarea = document.getElementById("singletonDomains");
 const saveSingletonDomainsBtn = document.getElementById("saveSingletonDomainsBtn");
+const singletonRegexInput = document.getElementById("singletonRegex");
+const saveSingletonRegexBtn = document.getElementById("saveSingletonRegexBtn");
 
 const tabs = document.querySelectorAll(".tab");
 const tabContents = document.querySelectorAll(".tab-content");
@@ -149,7 +151,7 @@ tabs.forEach((tab) => {
     document.getElementById(`${tabName}Tab`).classList.add("active");
 
     if (tabName === "favicons") loadCustomFaviconsList();
-    if (tabName === "singletons") loadSingletonDomains();
+    if (tabName === "singletons") loadSingletonSettings();
   });
 });
 
@@ -201,6 +203,19 @@ async function loadSingletonDomains() {
   } catch (error) {
     console.error("Error loading singleton domains:", error);
     singletonDomainsTextarea.value = "";
+  }
+}
+
+async function loadSingletonSettings() {
+  await loadSingletonDomains();
+
+  try {
+    const storage = await browser.storage.local.get("singletonRegex");
+    const pattern = typeof storage.singletonRegex === "string" ? storage.singletonRegex : "";
+    singletonRegexInput.value = pattern;
+  } catch (error) {
+    console.error("Error loading singleton regex:", error);
+    singletonRegexInput.value = "";
   }
 }
 
@@ -290,7 +305,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Preload for cases where the user lands directly on the Single-tab tab later.
-  loadSingletonDomains();
+  loadSingletonSettings();
   loadCustomFaviconsList();
 });
 
@@ -342,5 +357,32 @@ saveSingletonDomainsBtn.addEventListener("click", async () => {
   } catch (error) {
     console.error(error);
     announce("Failed to save single-tab domains", "red", "white");
+  }
+});
+
+saveSingletonRegexBtn.addEventListener("click", async () => {
+  const raw = String(singletonRegexInput.value ?? "").trim();
+
+  if (raw) {
+    try {
+      // Validate now so we can give immediate feedback.
+      new RegExp(raw);
+    } catch {
+      return announce("Invalid regex pattern", "red", "white");
+    }
+  }
+
+  try {
+    if (!raw) {
+      await browser.storage.local.remove("singletonRegex");
+      announce("Single-tab regex cleared", "green", "white");
+      return;
+    }
+
+    await browser.storage.local.set({ singletonRegex: raw });
+    announce("Single-tab regex saved", "green", "white");
+  } catch (error) {
+    console.error(error);
+    announce("Failed to save single-tab regex", "red", "white");
   }
 });
